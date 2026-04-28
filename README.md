@@ -4,7 +4,7 @@
 
 ## 다운로드
 
-[Releases](../../releases) 페이지에서 최신 `ba-InventoryAnalyzer-win64.zip`을 받으세요.
+[Releases](../../releases) 페이지에서 최신 `ba_InventoryAnalyzer-win-x64.zip`을 받으세요.
 
 ## 사용법
 
@@ -86,7 +86,7 @@ OCR 결과 중 검수가 필요한 항목을 `[REVIEW]`로 표시합니다:
 
 ## 기술 스택
 
-- Python 3.13, OpenCV, ONNX Runtime (YOLO digit detection), PySide6
+- Python 3.14, OpenCV, ONNX Runtime (YOLO digit detection), PySide6
 - PyInstaller (배포용 빌드)
 
 ## 크레딧
