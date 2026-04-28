@@ -131,7 +131,9 @@ def process_image_streaming(
             current_order_idx = best_offset + ci
 
         if not (0 <= current_order_idx < len(item_order)):
-            break
+            if started:
+                break  # walked past the end of item_order
+            continue  # leading cells before item_order range — skip
 
         mid = item_order[current_order_idx]
         if mid is None:
