@@ -320,30 +320,53 @@ def process_image_streaming(
         current_order_idx += step
 
 
+@dataclass
+class ImageProgress:
+    """Progress marker emitted when starting a new image."""
+    current: int  # 1-based
+    total: int
+
+
+def process_all_images_streaming(
+    images: list[np.ndarray],
+    item_order: list[str | None],
+    matcher: ItemMatcher,
+    reader: CountOcrBackend,
+) -> Iterator[ImageProgress | CellResult]:
+    """Process multiple images, yielding progress and results as a stream.
+
+    Yields:
+        ImageProgress when starting each image.
+        CellResult for each processed cell (deduped across images).
+    """
+    seen: set[str] = set()
+    total = len(images)
+
+    for i, image in enumerate(images):
+        yield ImageProgress(current=i + 1, total=total)
+
+        for cell_result in process_image_streaming(image, item_order, matcher, reader):
+            if cell_result.material_id not in seen:
+                seen.add(cell_result.material_id)
+                yield cell_result
+
+
 def process_all_images(
     images: list[np.ndarray],
     item_order: list[str | None],
     matcher: ItemMatcher,
     reader: CountOcrBackend,
 ) -> tuple[dict[str, tuple[int, float]], dict[str, np.ndarray]]:
-    """Process multiple screenshots independently and merge results.
+    """Process multiple screenshots and merge results.
 
-    Each image is auto-scanned for its start position. Duplicate items
-    keep the first occurrence.
-
-    Returns:
-        (merged_results, merged_cell_images)
+    Wraps the streaming pipeline for backward compatibility.
     """
     all_results: dict[str, tuple[int, float]] = {}
     all_cell_images: dict[str, np.ndarray] = {}
 
-    for image in images:
-        results, cell_images = process_single_image(
-            image, item_order, matcher, reader
-        )
-        for mid, val in results.items():
-            if mid not in all_results:
-                all_results[mid] = val
-                all_cell_images[mid] = cell_images[mid]
+    for event in process_all_images_streaming(images, item_order, matcher, reader):
+        if isinstance(event, CellResult):
+            all_results[event.material_id] = (event.quantity, event.confidence)
+            all_cell_images[event.material_id] = event.cell_image
 
     return all_results, all_cell_images
