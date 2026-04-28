@@ -109,11 +109,6 @@ class InputPage(QWidget):
         self.btn_analyze.clicked.connect(self._on_analyze)
         layout.addWidget(self.btn_analyze)
 
-        self.loading_label = QLabel("분석 중...")
-        self.loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.loading_label.hide()
-        layout.addWidget(self.loading_label)
-
         layout.addStretch()
 
     def paste_image(self):
@@ -343,6 +338,8 @@ class MainWindow(QMainWindow):
         self._confirmed: dict[str, int] = {}
         self._worker: AnalyzeWorker | None = None
         self._justin_data: dict = {}
+        self._pending_review: list[ReviewItem] = []
+        self._reviewing = False
 
         self._reader: CountOcrBackend | None = None
         self._matcher: ItemMatcher | None = None
@@ -353,10 +350,12 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.stack)
 
         self.input_page = InputPage()
+        self.analyzing_page = AnalyzingPage()
         self.review_page = ReviewPage()
         self.result_page = ResultPage()
 
         self.stack.addWidget(self.input_page)
+        self.stack.addWidget(self.analyzing_page)
         self.stack.addWidget(self.review_page)
         self.stack.addWidget(self.result_page)
 
@@ -406,8 +405,12 @@ class MainWindow(QMainWindow):
             return
 
         self._json_text = json_text
-        self.input_page.loading_label.show()
-        self.input_page.btn_analyze.setEnabled(False)
+        self._confirmed = {}
+        self._pending_review = []
+        self._reviewing = False
+
+        self.analyzing_page.reset()
+        self.stack.setCurrentWidget(self.analyzing_page)
 
         self._worker = AnalyzeWorker(
             images,
@@ -415,37 +418,75 @@ class MainWindow(QMainWindow):
             self._get_matcher(),
             self._get_reader(),
         )
+        self._worker.progress.connect(self._on_progress)
+        self._worker.item_ready.connect(self._on_item_ready)
         self._worker.finished.connect(self._on_analyze_done)
         self._worker.error.connect(self._on_analyze_error)
         self._worker.start()
 
-    def _on_analyze_done(self, results: dict, cell_images: dict):
-        self.input_page.loading_label.hide()
-
-        if not results:
+    def _on_analyze_done(self):
+        if not self._confirmed and not self._pending_review:
             QMessageBox.warning(self, "Error", "No items detected")
             self.input_page.btn_analyze.setEnabled(True)
+            self.stack.setCurrentWidget(self.input_page)
             return
 
-        existing = self._justin_data.get("owned_materials", {})
-        review_items = find_review_items(results, existing, cell_images, threshold=0.9)
-
-        review_mids = {item.material_id for item in review_items}
-        self._confirmed = {mid: qty for mid, (qty, _) in results.items() if mid not in review_mids}
-
-        if review_items:
-            self.review_page.set_items(review_items, self._name_map)
-            self.stack.setCurrentWidget(self.review_page)
-        else:
+        if not self._reviewing and not self._pending_review:
             self._finalize({})
+        elif not self._reviewing and self._pending_review:
+            self._try_show_review()
 
     def _on_analyze_error(self, msg: str):
-        self.input_page.loading_label.hide()
         self.input_page.btn_analyze.setEnabled(True)
+        self.stack.setCurrentWidget(self.input_page)
         QMessageBox.warning(self, "Error", msg)
 
+    def _on_progress(self, current: int, total: int):
+        self.analyzing_page.update_progress(current, total)
+
+    def _on_item_ready(self, material_id: str, qty: int, confidence: float, cell_image):
+        existing = self._justin_data.get("owned_materials", {})
+
+        reasons: list[str] = []
+        if confidence < 0.9:
+            reasons.append(f"low confidence ({confidence:.2f})")
+        if material_id in existing:
+            old_val = int(existing[material_id]) if existing[material_id] else 0
+            if abs(qty - old_val) >= 100:
+                reasons.append(f"deviation {qty - old_val:+d} (was {old_val})")
+
+        if reasons:
+            item = ReviewItem(
+                material_id=material_id,
+                ocr_qty=qty,
+                confidence=confidence,
+                reasons=reasons,
+                cell_image=cell_image,
+            )
+            self._pending_review.append(item)
+            self._try_show_review()
+        else:
+            self._confirmed[material_id] = qty
+
+    def _try_show_review(self):
+        """Show pending review items if not already reviewing."""
+        if self._reviewing or not self._pending_review:
+            return
+
+        self._reviewing = True
+        self.review_page.set_items(self._pending_review, self._name_map)
+        self.stack.setCurrentWidget(self.review_page)
+
     def _on_review_done(self, reviewed: dict[str, int]):
-        self._finalize(reviewed)
+        self._reviewing = False
+        self._pending_review = []
+
+        if self._worker is not None and self._worker.isRunning():
+            self.stack.setCurrentWidget(self.analyzing_page)
+            self.analyzing_page.placeholder.show()
+            self.analyzing_page.placeholder.setText("분석 중입니다")
+        else:
+            self._finalize(reviewed)
 
     def _finalize(self, reviewed: dict[str, int]):
         all_updates = {}
