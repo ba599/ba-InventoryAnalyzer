@@ -1,7 +1,7 @@
 __pycache__/
 .venv*/
 .pytest_cache/
-.claude/
+.claude/settings.local.json
 docs/debug/
 docs/input-image/
 docs/output/

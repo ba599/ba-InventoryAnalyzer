@@ -63,16 +63,15 @@ def process_image_streaming(
     matcher: ItemMatcher,
     reader: CountOcrBackend,
     min_match_score: float = 0.6,
-    consensus_count: int = 7,
     min_consensus: int = 3,
 ) -> Iterator[CellResult]:
     """Process a single screenshot, yielding results one cell at a time.
 
-    Phase 1 (matching): Match cells until `consensus_count` trackable items
-    are found. Use consensus voting to determine start position and direction.
+    Phase 1 (matching): Match odd-indexed cells across the entire image to
+    build consensus on start position and direction.
 
-    Phase 2 (index-walking): Assign remaining cells by walking item_order.
-    Stop when a null (BREAK_POINT) slot is encountered.
+    Phase 2 (index-walking): Walk all cells from cell 0 using the consensus
+    offset. Stop when a null (BREAK_POINT) slot is encountered.
 
     Yields:
         CellResult for each successfully processed cell.
@@ -87,16 +86,14 @@ def process_image_streaming(
         if mid is not None and mid not in order_index:
             order_index[mid] = idx
 
-    # Phase 1: Match cells to build consensus
+    # Phase 1: Match odd-indexed cells to build consensus.
+    # Odd-indexed sampling covers the full image with half the matcher calls,
+    # giving a much more reliable majority vote than matching only the first N.
     fwd_votes: Counter[int] = Counter()
     rev_votes: Counter[int] = Counter()
-    matched_cells: list[tuple[int, str, float]] = []  # (cell_idx, material_id, score)
-    trackable_count = 0
 
-    phase1_last_cell_idx = -1
-    for cell_idx, cell in enumerate(cells):
-        phase1_last_cell_idx = cell_idx
-        icon = crop_icon_region(image, cell)
+    for cell_idx in range(1, len(cells), 2):
+        icon = crop_icon_region(image, cells[cell_idx])
         matched_id, score = matcher.match_with_score(icon)
 
         if matched_id is None or score < min_match_score:
@@ -107,11 +104,6 @@ def process_image_streaming(
         j = order_index[matched_id]
         fwd_votes[j - cell_idx] += 1
         rev_votes[j + cell_idx] += 1
-        matched_cells.append((cell_idx, matched_id, score))
-        trackable_count += 1
-
-        if trackable_count >= consensus_count:
-            break
 
     # Determine consensus
     fwd_best = fwd_votes.most_common(1)[0] if fwd_votes else (0, 0)

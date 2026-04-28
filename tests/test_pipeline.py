@@ -11,26 +11,22 @@ def _make_cell_info(x, y, w, h, row, col):
 
 def test_process_image_streaming_returns_results():
     """process_image_streaming yields CellResult for each matched cell."""
-    fake_image = np.zeros((200, 400, 3), dtype=np.uint8)
-    item_order = ["100", "101", "102"]
+    fake_image = np.zeros((200, 800, 3), dtype=np.uint8)
+    item_order = [str(i) for i in range(100, 110)]  # 10 items
 
     mock_matcher = MagicMock()
     mock_reader = MagicMock()
 
-    cells = [
-        _make_cell_info(0, 0, 80, 80, 0, 0),
-        _make_cell_info(80, 0, 80, 80, 0, 1),
-        _make_cell_info(160, 0, 80, 80, 0, 2),
+    # 6 cells so odd indices (1,3,5) get matched
+    cells = [_make_cell_info(i * 80, 0, 80, 80, 0, i) for i in range(6)]
+
+    # Odd cells (1,3,5) match items 101,103,105 -> fwd offsets: 100,100,100
+    mock_matcher.match_with_score.side_effect = [
+        ("101", 0.9), ("103", 0.9), ("105", 0.9),
     ]
 
-    match_returns = [("100", 0.9), ("101", 0.9), ("102", 0.9)]
-    mock_matcher.match_with_score.side_effect = match_returns
-
-    mock_reader.read_quantity.side_effect = [
-        (500, 0.95),
-        (200, 0.80),
-        (100, 0.50),
-    ]
+    # All 6 cells get OCR in phase 2
+    mock_reader.read_quantity.side_effect = [(i * 100, 0.95) for i in range(6)]
 
     with patch("src.core.pipeline.detect_cells", return_value=cells), \
          patch("src.core.pipeline.crop_icon_region", return_value=fake_image[:80, :80]), \
@@ -39,12 +35,13 @@ def test_process_image_streaming_returns_results():
             fake_image, item_order, mock_matcher, mock_reader
         ))
 
+    assert len(results) == 6
     mids = {r.material_id for r in results}
     assert "100" in mids
     assert "101" in mids
-    assert "102" in mids
+    assert "105" in mids
     r100 = next(r for r in results if r.material_id == "100")
-    assert r100.quantity == 500
+    assert r100.quantity == 0
     assert r100.confidence == 0.95
 
 
@@ -56,7 +53,8 @@ def test_process_image_streaming_no_match_returns_empty():
     mock_matcher = MagicMock()
     mock_reader = MagicMock()
 
-    cells = [_make_cell_info(0, 0, 80, 80, 0, 0)]
+    # Need at least 2 cells so odd index 1 exists
+    cells = [_make_cell_info(0, 0, 80, 80, 0, 0), _make_cell_info(80, 0, 80, 80, 0, 1)]
     mock_matcher.match_with_score.return_value = (None, -1.0)
 
     with patch("src.core.pipeline.detect_cells", return_value=cells), \
@@ -69,25 +67,27 @@ def test_process_image_streaming_no_match_returns_empty():
 
 
 def test_process_image_streaming_stops_at_null_dump():
-    """Null entries in item_order act as dump boundaries — processing stops."""
-    fake_image = np.zeros((200, 400, 3), dtype=np.uint8)
-    item_order = ["100", None, "102", "103", "104"]
+    """Null entries in item_order act as BREAK_POINT — processing stops."""
+    fake_image = np.zeros((200, 800, 3), dtype=np.uint8)
+    item_order = ["100", "101", None, "103", "104", "105"]
 
     mock_matcher = MagicMock()
     mock_reader = MagicMock()
 
-    cells = [
-        _make_cell_info(0, 0, 80, 80, 0, 0),
-        _make_cell_info(80, 0, 80, 80, 0, 1),
-        _make_cell_info(160, 0, 80, 80, 0, 2),
-        _make_cell_info(240, 0, 80, 80, 0, 3),
+    # 6 cells, odd indices (1,3,5) get matched
+    cells = [_make_cell_info(i * 80, 0, 80, 80, 0, i) for i in range(6)]
+
+    # Odd cells match: cell1->101(idx1), cell3->103(idx3), cell5->105(idx5)
+    # fwd offsets: 1-1=0, 3-3=0, 5-5=0 -> consensus offset=0
+    mock_matcher.match_with_score.side_effect = [
+        ("101", 0.9), ("103", 0.9), ("105", 0.9),
     ]
 
-    match_returns = [("100", 0.9), ("100", 0.9), ("102", 0.9), ("103", 0.9)]
-    mock_matcher.match_with_score.side_effect = match_returns
-
+    # Phase 2 walks from cell 0: item_order[0]="100", item_order[1]="101",
+    # item_order[2]=None -> BREAK_POINT, stop
     mock_reader.read_quantity.side_effect = [
         (500, 0.95),
+        (200, 0.80),
     ]
 
     with patch("src.core.pipeline.detect_cells", return_value=cells), \
@@ -99,26 +99,27 @@ def test_process_image_streaming_stops_at_null_dump():
 
     mids = [r.material_id for r in results]
     assert "100" in mids
-    # Stops at null dump — items after the null are NOT processed
-    assert "102" not in mids
+    assert "101" in mids
+    # Stops at BREAK_POINT — items after null are NOT processed
+    assert "103" not in mids
     assert None not in mids
 
 
-def test_process_image_streaming_matches_only_first_7_trackable():
-    """After 7 trackable matches, remaining cells use index walking (no matcher calls)."""
+def test_process_image_streaming_only_matches_odd_cells():
+    """Matcher is only called for odd-indexed cells, not all cells."""
     fake_image = np.zeros((200, 800, 3), dtype=np.uint8)
-    item_order = [str(i) for i in range(100, 115)]  # 15 trackable items
+    item_order = [str(i) for i in range(100, 120)]  # 20 items
 
     mock_matcher = MagicMock()
     mock_reader = MagicMock()
 
     cells = [_make_cell_info(i * 80, 0, 80, 80, 0, i) for i in range(10)]
 
-    # First 7 cells match items 100-106 (consensus: forward, offset=100 in item_order)
-    match_returns = [(str(100 + i), 0.9) for i in range(7)]
-    mock_matcher.match_with_score.side_effect = match_returns
+    # 5 odd cells (1,3,5,7,9) get matched
+    mock_matcher.match_with_score.side_effect = [
+        (str(100 + i), 0.9) for i in range(1, 10, 2)
+    ]
 
-    # All 10 cells get OCR
     mock_reader.read_quantity.side_effect = [(i * 100, 0.95) for i in range(10)]
 
     with patch("src.core.pipeline.detect_cells", return_value=cells), \
@@ -129,16 +130,16 @@ def test_process_image_streaming_matches_only_first_7_trackable():
         ))
 
     assert len(results) == 10
-    # Matcher called exactly 7 times (not 10)
-    assert mock_matcher.match_with_score.call_count == 7
+    # Matcher called exactly 5 times (odd cells only)
+    assert mock_matcher.match_with_score.call_count == 5
     # Reader called 10 times (all cells get OCR)
     assert mock_reader.read_quantity.call_count == 10
 
 
 def test_process_image_streaming_stops_at_dump():
-    """When item_order hits null (dump), stop yielding results."""
+    """When item_order hits null (BREAK_POINT), stop yielding results."""
     fake_image = np.zeros((200, 800, 3), dtype=np.uint8)
-    # 5 trackable, then dump (null), then more items
+    # 5 trackable, then BREAK_POINT (null), then more items
     item_order = ["100", "101", "102", "103", "104", None, "200", "201"]
 
     mock_matcher = MagicMock()
@@ -146,13 +147,13 @@ def test_process_image_streaming_stops_at_dump():
 
     cells = [_make_cell_info(i * 80, 0, 80, 80, 0, i) for i in range(8)]
 
-    # First 5 cells match trackable items 100-104; remaining 3 cells match
-    # unknown items (not in item_order). Since we can't reach consensus_count=7
-    # with only 5 trackable matches, the loop exhausts all cells.
-    # Consensus from 5 matches (>=3) should still work.
-    match_returns = [(str(100 + i), 0.9) for i in range(5)]
-    match_returns += [("UNKNOWN_X", 0.9), ("UNKNOWN_Y", 0.9), ("UNKNOWN_Z", 0.9)]
-    mock_matcher.match_with_score.side_effect = match_returns
+    # Odd cells (1,3,5,7): cell1->101, cell3->103, cell5->??, cell7->??
+    # For offset=100: cell1 -> idx 101 (101), cell3 -> idx 103 (103)
+    # cell5 -> idx 105 = None (untrackable), cell7 -> idx 107 = "201"
+    # fwd offsets: 1-1=100, 3-3=100, 7-7=100 -> consensus=100
+    mock_matcher.match_with_score.side_effect = [
+        ("101", 0.9), ("103", 0.9), ("200", 0.1), ("201", 0.9),
+    ]
 
     mock_reader.read_quantity.side_effect = [(i * 100, 0.95) for i in range(5)]
 
@@ -163,7 +164,7 @@ def test_process_image_streaming_stops_at_dump():
             fake_image, item_order, mock_matcher, mock_reader
         ))
 
-    # Only 5 results — stopped at dump
+    # Only 5 results — stopped at BREAK_POINT
     assert len(results) == 5
     result_mids = [r.material_id for r in results]
     assert "200" not in result_mids
@@ -171,23 +172,22 @@ def test_process_image_streaming_stops_at_dump():
 
 
 def test_process_image_streaming_skips_leading_untrackable():
-    """Cells with icons not in item_order are skipped during matching phase."""
+    """Leading null slots in item_order are skipped, not treated as BREAK_POINT."""
     fake_image = np.zeros((200, 800, 3), dtype=np.uint8)
     item_order = [None, None, None, "100", "101", "102", "103", "104", "105", "106"]
 
     mock_matcher = MagicMock()
     mock_reader = MagicMock()
 
-    # 10 cells: first 3 are untrackable, then 7 trackable
     cells = [_make_cell_info(i * 80, 0, 80, 80, 0, i) for i in range(10)]
 
-    # First 3 cells match unknown IDs, next 7 match trackable items
-    match_returns = [
-        ("UNKNOWN_1", 0.9), ("UNKNOWN_2", 0.9), ("UNKNOWN_3", 0.9),
-        ("100", 0.9), ("101", 0.9), ("102", 0.9), ("103", 0.9),
-        ("104", 0.9), ("105", 0.9), ("106", 0.9),
+    # Odd cells (1,3,5,7,9) matched. With offset=3 (leading nulls):
+    # cell1->idx4="101", cell3->idx6="103", cell5->idx8="105", cell7->idx10=OOB
+    # fwd: 4-1=3, 6-3=3, 8-5=3 -> consensus offset=3
+    mock_matcher.match_with_score.side_effect = [
+        ("101", 0.9), ("103", 0.9), ("105", 0.9),
+        (None, -1.0), (None, -1.0),
     ]
-    mock_matcher.match_with_score.side_effect = match_returns
 
     mock_reader.read_quantity.side_effect = [(i * 100, 0.95) for i in range(7)]
 
@@ -198,31 +198,30 @@ def test_process_image_streaming_skips_leading_untrackable():
             fake_image, item_order, mock_matcher, mock_reader
         ))
 
-    # 7 trackable results, not 10
+    # 7 trackable results (items 100-106), leading nulls skipped
     assert len(results) == 7
     result_mids = [r.material_id for r in results]
-    assert "UNKNOWN_1" not in result_mids
     assert "100" in result_mids
+    assert "106" in result_mids
 
 
 def test_process_all_images_streaming_yields_progress_and_results():
     """Iterating multiple images yields progress markers and cell results."""
-    fake_image = np.zeros((200, 400, 3), dtype=np.uint8)
-    item_order = ["100", "101", "102"]
+    fake_image = np.zeros((200, 800, 3), dtype=np.uint8)
+    item_order = [str(i) for i in range(100, 106)]  # 6 items
 
     mock_matcher = MagicMock()
     mock_reader = MagicMock()
 
-    cells = [
-        _make_cell_info(0, 0, 80, 80, 0, 0),
-        _make_cell_info(80, 0, 80, 80, 0, 1),
-        _make_cell_info(160, 0, 80, 80, 0, 2),
+    cells = [_make_cell_info(i * 80, 0, 80, 80, 0, i) for i in range(6)]
+
+    # Each image: odd cells (1,3,5) matched -> offsets 100,100,100
+    mock_matcher.match_with_score.side_effect = [
+        ("101", 0.9), ("103", 0.9), ("105", 0.9),  # image 1
+        ("101", 0.9), ("103", 0.9), ("105", 0.9),  # image 2
     ]
 
-    match_returns = [(str(100 + i), 0.9) for i in range(3)]
-    mock_matcher.match_with_score.side_effect = match_returns * 2  # 2 images
-
-    mock_reader.read_quantity.side_effect = [(i * 100, 0.95) for i in range(6)]
+    mock_reader.read_quantity.side_effect = [(i * 100, 0.95) for i in range(12)]
 
     with patch("src.core.pipeline.detect_cells", return_value=cells), \
          patch("src.core.pipeline.crop_icon_region", return_value=fake_image[:80, :80]), \
@@ -241,4 +240,4 @@ def test_process_all_images_streaming_yields_progress_and_results():
     assert progress_events[1].current == 2
 
     # Second image should not re-yield already-seen material_ids
-    assert len(cell_events) == 3  # only from first image (second has same items)
+    assert len(cell_events) == 6  # only from first image (second has same items)
