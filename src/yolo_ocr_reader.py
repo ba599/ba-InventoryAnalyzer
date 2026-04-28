@@ -134,8 +134,10 @@ class YoloOcrReader(CountOcrBackend):
         return "yolo"
 
     def __init__(self, model_path: str = "models/YOLO26m_BA_AUTO_CAL_digt_v1.onnx"):
-        self._model_path = model_path
-        self._session = self._get_session(model_path)
+        from src.runtime_path import data_path
+        resolved = str(data_path(model_path))
+        self._model_path = resolved
+        self._session = self._get_session(resolved)
 
         # Read model input size from metadata (fallback 160x160)
         meta = self._session.get_modelmeta().custom_metadata_map

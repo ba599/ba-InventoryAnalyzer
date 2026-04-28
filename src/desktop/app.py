@@ -322,12 +322,14 @@ class MainWindow(QMainWindow):
 
     def _get_matcher(self) -> ItemMatcher:
         if self._matcher is None:
-            self._matcher = ItemMatcher(Path("references"))
+            from src.runtime_path import data_path
+            self._matcher = ItemMatcher(data_path("references"))
         return self._matcher
 
     def _get_item_order(self) -> list[str | None]:
         if self._item_order is None:
-            self._item_order = load_item_order(Path("item_order.json"))
+            from src.runtime_path import data_path
+            self._item_order = load_item_order(data_path("item_order.json"))
         return self._item_order
 
     def _on_analyze(self, json_text: str, images: list[np.ndarray]):

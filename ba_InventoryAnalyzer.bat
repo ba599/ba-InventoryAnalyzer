@@ -1,3 +1,3 @@
-call "%~dp0.venv313\Scripts\activate.bat"
-python -m src.desktop.app
+call "%~dp0.venv314\Scripts\activate.bat"
+python launcher.py
 pause
