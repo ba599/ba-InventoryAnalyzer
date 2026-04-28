@@ -1,6 +1,6 @@
 [
   {
-    "dump1": null,
+    "BREAK_POINT_1": null,
 
     "100": "네브라 디스크 조각",
     "101": "파손된 네브라 디스크",
@@ -255,7 +255,7 @@
     "5033": "건강보조식품",
     "5034": "여름용 튜브",
 
-    "dump2": null,
+    "BREAK_POINT_2": null,
 
     "T2_Hat": "T2_모자",
     "T3_Hat": "T3_모자",
@@ -339,6 +339,6 @@
     "T9_Necklace": "T9_목걸이",
     "T10_Necklace": "T10_목걸이",
 
-    "dump3": null
+    "BREAK_POINT_3": null
   }
 ]

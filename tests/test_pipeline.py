@@ -68,8 +68,8 @@ def test_process_image_streaming_no_match_returns_empty():
     assert results == []
 
 
-def test_process_image_streaming_skips_null_items():
-    """Null entries in item_order are skipped."""
+def test_process_image_streaming_stops_at_null_dump():
+    """Null entries in item_order act as dump boundaries — processing stops."""
     fake_image = np.zeros((200, 400, 3), dtype=np.uint8)
     item_order = ["100", None, "102", "103", "104"]
 
@@ -88,8 +88,6 @@ def test_process_image_streaming_skips_null_items():
 
     mock_reader.read_quantity.side_effect = [
         (500, 0.95),
-        (200, 0.80),
-        (300, 0.90),
     ]
 
     with patch("src.core.pipeline.detect_cells", return_value=cells), \
@@ -101,7 +99,8 @@ def test_process_image_streaming_skips_null_items():
 
     mids = [r.material_id for r in results]
     assert "100" in mids
-    assert "102" in mids
+    # Stops at null dump — items after the null are NOT processed
+    assert "102" not in mids
     assert None not in mids
 
 

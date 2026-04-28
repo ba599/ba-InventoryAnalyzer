@@ -72,7 +72,7 @@ def process_image_streaming(
     are found. Use consensus voting to determine start position and direction.
 
     Phase 2 (index-walking): Assign remaining cells by walking item_order.
-    Stop when a null (dump) slot is encountered.
+    Stop when a null (BREAK_POINT) slot is encountered.
 
     Yields:
         CellResult for each successfully processed cell.
@@ -129,15 +129,26 @@ def process_image_streaming(
 
     step = -1 if reversed_order else 1
 
-    # Phase 1 results: yield matched cells that align with consensus
+    # Walk ALL cells from cell 0 using consensus offset
     seen: set[str] = set()
-    for ci, mid, score in matched_cells:
+    started = False  # True once we've seen at least one real item
+    for ci in range(len(cells)):
         if reversed_order:
-            expected_offset = order_index[mid] + ci
+            current_order_idx = best_offset - ci
         else:
-            expected_offset = order_index[mid] - ci
-        if expected_offset != best_offset:
-            continue  # outlier vote — skip
+            current_order_idx = best_offset + ci
+
+        if not (0 <= current_order_idx < len(item_order)):
+            break
+
+        mid = item_order[current_order_idx]
+        if mid is None:
+            if started:
+                break  # BREAK_POINT — stop
+            continue  # skip leading null slots
+
+        started = True
+
         if mid in seen:
             continue
 
@@ -149,32 +160,6 @@ def process_image_streaming(
             cell_crop = image[cell.y:cell.y + cell.h, cell.x:cell.x + cell.w].copy()
             seen.add(mid)
             yield CellResult(mid, qty, conf, cell_crop)
-
-    # Phase 2: Walk item_order for remaining cells (no matching)
-    if reversed_order:
-        current_order_idx = best_offset - (phase1_last_cell_idx + 1)
-    else:
-        current_order_idx = best_offset + (phase1_last_cell_idx + 1)
-
-    for ci in range(phase1_last_cell_idx + 1, len(cells)):
-        if not (0 <= current_order_idx < len(item_order)):
-            break
-
-        mid = item_order[current_order_idx]
-        if mid is None:
-            break  # dump boundary — stop
-
-        if mid not in seen:
-            text_img = crop_text_region(image, cells[ci])
-            result = reader.read_quantity(text_img)
-            if result is not None:
-                qty, conf = result
-                cell = cells[ci]
-                cell_crop = image[cell.y:cell.y + cell.h, cell.x:cell.x + cell.w].copy()
-                seen.add(mid)
-                yield CellResult(mid, qty, conf, cell_crop)
-
-        current_order_idx += step
 
 
 @dataclass
