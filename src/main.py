@@ -4,15 +4,15 @@ import cv2
 from src.core.pipeline import load_item_order, find_start_cell
 from src.grid_detector import detect_cells, crop_text_region
 from src.item_matcher import ItemMatcher
-from src.ocr_reader import OcrReader
+from src.count_ocr_backend import build_backend
 from src.json_updater import load_json, update_owned_materials, save_json
 
 
 def process_screenshots_sequential(
     images: list,
     item_order: list[str | None],
-    reader: OcrReader,
-    confidence_threshold: float = 0.7,
+    reader,
+    confidence_threshold: float = 0.9,
     start_id: str | None = None,
     matcher: "ItemMatcher | None" = None,
 ) -> dict[str, tuple[int, float]]:
@@ -91,11 +91,11 @@ def main():
     parser.add_argument("--refs", default="references", help="Reference images directory (unused with --start-id)")
     parser.add_argument("--output", help="Output JSON path (default: overwrite input)")
     parser.add_argument("--check", help="Answer JSON path for accuracy check")
-    parser.add_argument("--confidence-threshold", type=float, default=0.7, help="Confidence threshold for [CHECK] flag (default: 0.7)")
+    parser.add_argument("--confidence-threshold", type=float, default=0.9, help="Confidence threshold for [CHECK] flag (default: 0.9)")
     args = parser.parse_args()
 
     item_order = load_item_order(Path(args.order))
-    reader = OcrReader()
+    reader = build_backend()
     data = load_json(Path(args.json))
 
     valid_items = [x for x in item_order if x is not None]

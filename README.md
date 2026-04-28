@@ -18,7 +18,7 @@
 
 `ba-InventoryAnalyzer.exe`를 실행합니다.
 
-> 첫 실행 시 EasyOCR 모델을 다운로드하므로 시간이 걸릴 수 있습니다.
+> YOLO ONNX 모델(`models/` 폴더)이 필요합니다.
 
 #### 스크린샷 붙여넣기
 
@@ -59,7 +59,7 @@ python -m src.main \
 | `--refs` | `references` | 참조 이미지 디렉토리 |
 | `--output` | (입력 JSON 덮어쓰기) | 출력 JSON 경로 |
 | `--check` | (없음) | 정답 JSON 경로 (정확도 검증) |
-| `--confidence-threshold` | `0.7` | 수동 검수 플래그 임계값 |
+| `--confidence-threshold` | `0.9` | 수동 검수 플래그 임계값 |
 
 ## 수동 검수 (Manual Review)
 
@@ -77,22 +77,23 @@ OCR 결과 중 검수가 필요한 항목을 `[REVIEW]`로 표시합니다:
 
 ## 알려진 한계
 
-- OCR 정확도는 약 90~92% 수준입니다 (italic deskew 적용 후)
-- 첫 자리 누락, 끝자리 ±2 오차 등의 패턴이 있을 수 있습니다
+- YOLO digit detection 정확도는 약 98.6% 수준입니다
 - 스크린샷 상단이 잘린 아이템은 잘못 인식될 수 있습니다
 
 ## 삭제 방법
 
-1. 압축 해제한 `ba-InventoryAnalyzer` 폴더를 통째로 삭제하면 됩니다
-2. EasyOCR이 다운로드한 모델 파일도 삭제하려면 `C:\Users\<사용자명>\.EasyOCR` 폴더를 삭제하세요
-
-레지스트리나 AppData에 별도로 저장하는 데이터는 없습니다.
+압축 해제한 `ba-InventoryAnalyzer` 폴더를 통째로 삭제하면 됩니다. 레지스트리나 AppData에 별도로 저장하는 데이터는 없습니다.
 
 ## 기술 스택
 
-- Python 3.13, OpenCV, EasyOCR, PySide6
+- Python 3.13, OpenCV, ONNX Runtime (YOLO digit detection), PySide6
 - PyInstaller (배포용 빌드)
+
+## 크레딧
+
+- **YOLO digit detection 모델**: "블라리 인랭 계산기" 프로젝트 ([원본 배포 글](https://arca.live/b/bluearchive/168882227))에서 제공된 `YOLO26m_BA_AUTO_CAL_digt_v1.onnx` 모델을 사용합니다.
+- 이 프로젝트는 AI(Claude)의 도움으로 생성되었습니다.
 
 ## 라이선스
 
-이 프로젝트는 AI(Claude)의 도움으로 생성되었으며, [MIT License](LICENSE)로 배포됩니다.
+이 프로젝트는 Ultralytics YOLO 기반 모델을 포함하므로 [AGPL-3.0 License](LICENSE)로 배포됩니다.

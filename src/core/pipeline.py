@@ -5,7 +5,7 @@ import numpy as np
 
 from src.grid_detector import CellInfo, detect_cells, crop_icon_region, crop_text_region
 from src.item_matcher import ItemMatcher
-from src.ocr_reader import OcrReader
+from src.count_ocr_backend import CountOcrBackend
 
 
 def load_item_order(path: Path) -> list[str | None]:
@@ -38,7 +38,7 @@ def process_single_image(
     image: np.ndarray,
     item_order: list[str | None],
     matcher: ItemMatcher,
-    reader: OcrReader,
+    reader: CountOcrBackend,
     min_match_score: float = 0.6,
 ) -> tuple[dict[str, tuple[int, float]], dict[str, np.ndarray]]:
     """Process a single screenshot independently.
@@ -90,7 +90,7 @@ def process_all_images(
     images: list[np.ndarray],
     item_order: list[str | None],
     matcher: ItemMatcher,
-    reader: OcrReader,
+    reader: CountOcrBackend,
 ) -> tuple[dict[str, tuple[int, float]], dict[str, np.ndarray]]:
     """Process multiple screenshots independently and merge results.
 

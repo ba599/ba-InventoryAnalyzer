@@ -24,7 +24,7 @@ from src.core.pipeline import load_item_order, process_all_images
 from src.core.review import ReviewItem, find_review_items
 from src.item_matcher import ItemMatcher
 from src.json_updater import update_owned_materials
-from src.ocr_reader import OcrReader
+from src.count_ocr_backend import CountOcrBackend, build_backend
 
 
 def _cv2_to_qpixmap(img: np.ndarray) -> QPixmap:
@@ -279,7 +279,7 @@ class MainWindow(QMainWindow):
         self._worker: AnalyzeWorker | None = None
         self._justin_data: dict = {}
 
-        self._reader: OcrReader | None = None
+        self._reader: CountOcrBackend | None = None
         self._matcher: ItemMatcher | None = None
         self._item_order: list[str | None] | None = None
 
@@ -315,9 +315,9 @@ class MainWindow(QMainWindow):
                 return True  # consumed — don't let QTextEdit paste it as text
         return super().eventFilter(obj, event)
 
-    def _get_reader(self) -> OcrReader:
+    def _get_reader(self) -> CountOcrBackend:
         if self._reader is None:
-            self._reader = OcrReader()
+            self._reader = build_backend()
         return self._reader
 
     def _get_matcher(self) -> ItemMatcher:
@@ -360,7 +360,7 @@ class MainWindow(QMainWindow):
             return
 
         existing = self._justin_data.get("owned_materials", {})
-        review_items = find_review_items(results, existing, cell_images)
+        review_items = find_review_items(results, existing, cell_images, threshold=0.9)
 
         review_mids = {item.material_id for item in review_items}
         self._confirmed = {mid: qty for mid, (qty, _) in results.items() if mid not in review_mids}

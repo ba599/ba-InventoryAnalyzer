@@ -7,3 +7,4 @@ docs/output/
 build/
 dist/
 *.spec
+models/*.onnx
