@@ -49,11 +49,29 @@ class AnalyzeWorker(QThread):
 
     def run(self):
         try:
+            import logging, sys, traceback
+            log_path = str(Path(sys.executable).parent / "debug.log")
+            logging.basicConfig(
+                filename=log_path, level=logging.DEBUG, force=True,
+                format="%(asctime)s %(message)s",
+            )
+            logging.debug("=== AnalyzeWorker start ===")
+            logging.debug("sys._MEIPASS = %s", getattr(sys, "_MEIPASS", "NOT SET"))
+            logging.debug("refs loaded: %d", len(self.matcher.references))
+            logging.debug("item_order len: %d", len(self.item_order))
+            logging.debug("images: %d", len(self.images))
             results, cell_images = process_all_images(
                 self.images, self.item_order, self.matcher, self.reader
             )
+            logging.debug("results: %d items", len(results))
             self.finished.emit(results, cell_images)
         except Exception as e:
+            import logging, sys, traceback
+            log_path = str(Path(sys.executable).parent / "debug.log")
+            logging.basicConfig(
+                filename=log_path, level=logging.DEBUG, force=True,
+            )
+            logging.error("AnalyzeWorker error:\n%s", traceback.format_exc())
             self.error.emit(str(e))
 
 
@@ -194,10 +212,11 @@ class ReviewPage(QWidget):
 
         layout.addStretch()
 
-    def set_items(self, items: list[ReviewItem]):
+    def set_items(self, items: list[ReviewItem], name_map: dict[str, str] | None = None):
         self._items = items
         self._index = 0
         self._reviewed = {}
+        self._name_map = name_map or {}
         self._show_current()
 
     def _show_current(self):
@@ -212,7 +231,8 @@ class ReviewPage(QWidget):
         )
         self.image_label.setPixmap(scaled)
 
-        self.mid_label.setText(item.material_id)
+        display_name = self._name_map.get(item.material_id, item.material_id)
+        self.mid_label.setText(display_name)
         self.qty_input.setText(str(item.ocr_qty))
         self.reasons_label.setText(", ".join(item.reasons))
         self.qty_input.setFocus()
@@ -282,6 +302,7 @@ class MainWindow(QMainWindow):
         self._reader: CountOcrBackend | None = None
         self._matcher: ItemMatcher | None = None
         self._item_order: list[str | None] | None = None
+        self._name_map: dict[str, str] = {}
 
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
@@ -329,7 +350,7 @@ class MainWindow(QMainWindow):
     def _get_item_order(self) -> list[str | None]:
         if self._item_order is None:
             from src.runtime_path import data_path
-            self._item_order = load_item_order(data_path("item_order.json"))
+            self._item_order, self._name_map = load_item_order(data_path("item_order.json"))
         return self._item_order
 
     def _on_analyze(self, json_text: str, images: list[np.ndarray]):
@@ -368,7 +389,7 @@ class MainWindow(QMainWindow):
         self._confirmed = {mid: qty for mid, (qty, _) in results.items() if mid not in review_mids}
 
         if review_items:
-            self.review_page.set_items(review_items)
+            self.review_page.set_items(review_items, self._name_map)
             self.stack.setCurrentWidget(self.review_page)
         else:
             self._finalize({})

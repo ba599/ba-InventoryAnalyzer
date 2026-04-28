@@ -15,7 +15,8 @@ class ItemMatcher:
     def _load_references(self, ref_dir: Path) -> None:
         for path in sorted(ref_dir.glob("*.png")):
             material_id = path.stem
-            img = cv2.imread(str(path))
+            buf = np.fromfile(str(path), dtype=np.uint8)
+            img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
             if img is not None:
                 img = cv2.resize(img, self.MATCH_SIZE)
                 self.references[material_id] = img

@@ -40,6 +40,11 @@ def letterbox(
         h, w = img.shape[:2]
         channels = img.shape[2]
 
+    if h == 0 or w == 0:
+        if channels:
+            return np.full((target_h, target_w, channels), pad_value, dtype=img.dtype)
+        return np.full((target_h, target_w), pad_value, dtype=img.dtype)
+
     scale = min(target_h / h, target_w / w)
     new_h, new_w = int(round(h * scale)), int(round(w * scale))
 

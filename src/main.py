@@ -2,7 +2,7 @@ import argparse
 from pathlib import Path
 import cv2
 from src.core.pipeline import load_item_order, find_start_cell
-from src.grid_detector import detect_cells, crop_text_region
+from src.grid_detector import detect_cells, crop_icon_region, crop_text_region
 from src.item_matcher import ItemMatcher
 from src.count_ocr_backend import build_backend
 from src.json_updater import load_json, update_owned_materials, save_json
@@ -28,6 +28,7 @@ def process_screenshots_sequential(
     """
     results: dict[str, tuple[int, float]] = {}
     current_idx = None  # set on first image
+    step = 1
 
     for img in images:
         cells = detect_cells(img)
@@ -45,7 +46,10 @@ def process_screenshots_sequential(
                 if match is None:
                     print("  Warning: No matching item found, skipping image")
                     continue
-                cell_start, start_id, current_idx = match
+                cell_start, start_id, current_idx, reversed_order = match
+                step = -1 if reversed_order else 1
+                if reversed_order:
+                    print(f"  Detected reverse order (starting from {start_id})")
             elif start_id is not None and start_id in item_order:
                 current_idx = item_order.index(start_id)
             else:
@@ -53,18 +57,30 @@ def process_screenshots_sequential(
                 return results
 
         for cell in cells[cell_start:]:
-            if current_idx >= len(item_order):
+            if not (0 <= current_idx < len(item_order)):
                 break
 
             material_id = item_order[current_idx]
-            text_img = crop_text_region(img, cell)
-            result = reader.read_quantity(text_img)
 
             if material_id is None:
-                current_idx += 1
-                if result is not None:
-                    print(f"  [SKIP] position {current_idx - 1}: qty={result[0]}")
+                current_idx += step
                 continue
+
+            # Validate: check icon against expected reference
+            if matcher is not None:
+                ref = matcher.references.get(material_id)
+                if ref is not None:
+                    icon = crop_icon_region(img, cell)
+                    query = cv2.resize(icon, matcher.MATCH_SIZE)
+                    score = cv2.matchTemplate(query, ref, cv2.TM_CCOEFF_NORMED)[0][0]
+                    if score < 0.75:
+                        print(f"  [SKIP] cell doesn't match expected {material_id} (score={score:.2f})")
+                        continue
+
+            current_idx += step
+
+            text_img = crop_text_region(img, cell)
+            result = reader.read_quantity(text_img)
 
             if result is not None:
                 qty, conf = result
@@ -77,7 +93,6 @@ def process_screenshots_sequential(
             else:
                 print(f"  {material_id}: OCR failed, skipping")
 
-            current_idx += 1
 
     return results
 
@@ -94,7 +109,7 @@ def main():
     parser.add_argument("--confidence-threshold", type=float, default=0.9, help="Confidence threshold for [CHECK] flag (default: 0.9)")
     args = parser.parse_args()
 
-    item_order = load_item_order(Path(args.order))
+    item_order, name_map = load_item_order(Path(args.order))
     reader = build_backend()
     data = load_json(Path(args.json))
 

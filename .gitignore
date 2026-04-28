@@ -3,6 +3,7 @@ __pycache__/
 .pytest_cache/
 .claude/
 docs/debug/
+docs/input-image/
 docs/output/
 build/
 dist/
