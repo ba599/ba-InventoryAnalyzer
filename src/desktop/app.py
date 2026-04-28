@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QStackedWidget,
     QTextEdit,
@@ -158,6 +159,51 @@ class InputPage(QWidget):
     def _on_analyze(self):
         json_text = self.json_input.toPlainText().strip()
         self.analyze_requested.emit(json_text, self._images.copy())
+
+
+class AnalyzingPage(QWidget):
+    """Shows progress bar during analysis, with placeholder for review items."""
+
+    def __init__(self):
+        super().__init__()
+        self._init_ui()
+
+    def _init_ui(self):
+        layout = QVBoxLayout(self)
+
+        # Top: progress bar
+        self.progress_label = QLabel("분석 중 0/0")
+        self.progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.progress_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        layout.addWidget(self.progress_label)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMinimum(0)
+        self.progress_bar.setMaximum(1)
+        self.progress_bar.setValue(0)
+        layout.addWidget(self.progress_bar)
+
+        # Bottom: placeholder / review area
+        self.placeholder = QLabel("분석 중입니다")
+        self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.placeholder.setStyleSheet(
+            "font-size: 18px; color: #888; padding: 40px;"
+        )
+        self.placeholder.setMinimumHeight(300)
+        layout.addWidget(self.placeholder)
+
+        layout.addStretch()
+
+    def update_progress(self, current: int, total: int):
+        self.progress_bar.setMaximum(total)
+        self.progress_bar.setValue(current)
+        self.progress_label.setText(f"분석 중 {current}/{total}")
+
+    def reset(self):
+        self.progress_bar.setValue(0)
+        self.progress_bar.setMaximum(1)
+        self.progress_label.setText("분석 중 0/0")
+        self.placeholder.show()
 
 
 class ReviewPage(QWidget):
