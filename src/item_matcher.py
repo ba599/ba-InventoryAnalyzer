@@ -6,11 +6,21 @@ import numpy as np
 class ItemMatcher:
     """Matches icon crops against a reference image database using template matching."""
 
-    MATCH_SIZE = (64, 64)  # Normalize all images to this size for comparison
+    MATCH_SIZE = (96, 96)  # Normalize all images to this size for comparison
+    COLOR_WEIGHT = 0.4  # Weight for color histogram similarity in combined score
 
     def __init__(self, references_dir: Path):
         self.references: dict[str, np.ndarray] = {}
+        self._ref_hists: dict[str, np.ndarray] = {}
         self._load_references(references_dir)
+
+    @staticmethod
+    def _calc_hist(img: np.ndarray) -> np.ndarray:
+        """Calculate normalized HSV histogram for color comparison."""
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        hist = cv2.calcHist([hsv], [0, 1], None, [30, 32], [0, 180, 0, 256])
+        cv2.normalize(hist, hist)
+        return hist
 
     def _load_references(self, ref_dir: Path) -> None:
         for path in sorted(ref_dir.glob("*.png")):
@@ -20,6 +30,7 @@ class ItemMatcher:
             if img is not None:
                 img = cv2.resize(img, self.MATCH_SIZE)
                 self.references[material_id] = img
+                self._ref_hists[material_id] = self._calc_hist(img)
 
     def match(self, icon: np.ndarray, min_score: float = 0.0) -> str | None:
         """Find the best matching material_id for an icon crop.
@@ -39,6 +50,10 @@ class ItemMatcher:
     def match_with_score(self, icon: np.ndarray) -> tuple[str | None, float]:
         """Find the best matching material_id with its score.
 
+        Uses a combination of template matching (structural) and HSV histogram
+        comparison (color) to distinguish items with similar shapes but different
+        colors (e.g., BD items of different rarities or factions).
+
         Returns:
             (material_id, score) tuple, or (None, -1.0) if no references loaded.
         """
@@ -46,12 +61,17 @@ class ItemMatcher:
             return None, -1.0
 
         query = cv2.resize(icon, self.MATCH_SIZE)
+        query_hist = self._calc_hist(query)
+
         best_id = None
         best_score = -1.0
+        tw = 1.0 - self.COLOR_WEIGHT
+        cw = self.COLOR_WEIGHT
 
         for material_id, ref_img in self.references.items():
-            result = cv2.matchTemplate(query, ref_img, cv2.TM_CCOEFF_NORMED)
-            score = result[0][0]
+            template_score = cv2.matchTemplate(query, ref_img, cv2.TM_CCOEFF_NORMED)[0][0]
+            color_score = cv2.compareHist(query_hist, self._ref_hists[material_id], cv2.HISTCMP_CORREL)
+            score = template_score * tw + color_score * cw
             if score > best_score:
                 best_score = score
                 best_id = material_id

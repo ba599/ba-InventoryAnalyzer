@@ -59,8 +59,8 @@ class TestCropRegions:
         icon = crop_icon_region(sample_grid_image, cells[0])
         assert icon.shape[0] > 0
         assert icon.shape[1] > 0
-        # Icon height should be roughly 70% of cell height
-        assert icon.shape[0] == int(cells[0].h * 0.7)
+        # Icon height should be ~78% of cell height
+        assert icon.shape[0] == int(cells[0].h * 0.78)
 
     def test_crop_text_region(self, sample_grid_image):
         cells = detect_cells(sample_grid_image)
@@ -68,6 +68,6 @@ class TestCropRegions:
         text = crop_text_region(sample_grid_image, cells[0])
         assert text.shape[0] > 0
         assert text.shape[1] > 0
-        # Text height should be roughly 30% of cell height
-        expected_h = cells[0].h - int(cells[0].h * 0.7)
+        # Text height should be ~22% of cell height
+        expected_h = cells[0].h - int(cells[0].h * 0.78)
         assert text.shape[0] == expected_h
