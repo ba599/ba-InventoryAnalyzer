@@ -1,6 +1,7 @@
 import json
 from collections import Counter
-from dataclasses import dataclass
+from collections.abc import Iterator
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import cv2
@@ -17,7 +18,7 @@ class CellResult:
     material_id: str
     quantity: int
     confidence: float
-    cell_image: np.ndarray
+    cell_image: np.ndarray = field(compare=False, repr=False)
 
 
 def load_item_order(path: Path) -> tuple[list[str | None], dict[str, str]]:
@@ -207,7 +208,7 @@ def process_image_streaming(
     min_match_score: float = 0.6,
     consensus_count: int = 7,
     min_consensus: int = 3,
-):
+) -> Iterator[CellResult]:
     """Process a single screenshot, yielding results one cell at a time.
 
     Phase 1 (matching): Match cells until `consensus_count` trackable items
