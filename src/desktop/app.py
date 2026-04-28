@@ -20,7 +20,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.core.pipeline import load_item_order, process_all_images
+from src.core.pipeline import (
+    load_item_order,
+    process_all_images,
+    process_all_images_streaming,
+    CellResult,
+    ImageProgress,
+)
 from src.core.review import ReviewItem, find_review_items
 from src.item_matcher import ItemMatcher
 from src.json_updater import update_owned_materials
@@ -36,8 +42,10 @@ def _cv2_to_qpixmap(img: np.ndarray) -> QPixmap:
 
 
 class AnalyzeWorker(QThread):
-    """Background thread for OCR processing."""
-    finished = Signal(dict, dict)
+    """Background thread for streaming OCR processing."""
+    progress = Signal(int, int)           # (current_image, total_images)
+    item_ready = Signal(str, int, float, object)  # (material_id, qty, confidence, cell_image)
+    finished = Signal()
     error = Signal(str)
 
     def __init__(self, images, item_order, matcher, reader):
@@ -49,10 +57,19 @@ class AnalyzeWorker(QThread):
 
     def run(self):
         try:
-            results, cell_images = process_all_images(
+            for event in process_all_images_streaming(
                 self.images, self.item_order, self.matcher, self.reader
-            )
-            self.finished.emit(results, cell_images)
+            ):
+                if isinstance(event, ImageProgress):
+                    self.progress.emit(event.current, event.total)
+                elif isinstance(event, CellResult):
+                    self.item_ready.emit(
+                        event.material_id,
+                        event.quantity,
+                        event.confidence,
+                        event.cell_image,
+                    )
+            self.finished.emit()
         except Exception as e:
             self.error.emit(str(e))
 
