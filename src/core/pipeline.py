@@ -4,7 +4,6 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import cv2
 import numpy as np
 
 from src.grid_detector import detect_cells, crop_icon_region, crop_text_region

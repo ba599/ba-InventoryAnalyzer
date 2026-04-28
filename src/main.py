@@ -1,7 +1,7 @@
 import argparse
 from pathlib import Path
 import cv2
-from src.core.pipeline import load_item_order, find_start_cell
+from src.core.pipeline import load_item_order, process_image_streaming
 from src.grid_detector import detect_cells, crop_icon_region, crop_text_region
 from src.item_matcher import ItemMatcher
 from src.count_ocr_backend import build_backend
@@ -19,15 +19,27 @@ def process_screenshots_sequential(
     """Process screenshots sequentially.
 
     Modes:
-    - start_id given: first cell of first image = start_id
-    - matcher given (no start_id): auto-scan cells to find first known item
-    - both given: auto-scan overrides start_id
+    - matcher given: uses streaming pipeline (auto-scan + 7-match consensus)
+    - start_id given (no matcher): first cell of first image = start_id
 
     Returns:
         {material_id: (quantity, confidence)}
     """
     results: dict[str, tuple[int, float]] = {}
-    current_idx = None  # set on first image
+
+    if matcher is not None:
+        # Auto-scan mode: use streaming pipeline
+        for img in images:
+            for cell_result in process_image_streaming(img, item_order, matcher, reader):
+                mid = cell_result.material_id
+                if mid not in results:
+                    results[mid] = (cell_result.quantity, cell_result.confidence)
+                    flag = "[CHECK] " if cell_result.confidence < confidence_threshold else ""
+                    print(f"  {flag}{mid}: {cell_result.quantity} ({cell_result.confidence:.2f})")
+        return results
+
+    # Manual start_id mode: walk cells sequentially
+    current_idx = None
     step = 1
 
     for img in images:
@@ -37,26 +49,15 @@ def process_screenshots_sequential(
             continue
 
         print(f"  Detected {len(cells)} cells")
-        cell_start = 0
 
-        # First image: determine start position
         if current_idx is None:
-            if matcher is not None:
-                match = find_start_cell(cells, img, item_order, matcher)
-                if match is None:
-                    print("  Warning: No matching item found, skipping image")
-                    continue
-                cell_start, start_id, current_idx, reversed_order = match
-                step = -1 if reversed_order else 1
-                if reversed_order:
-                    print(f"  Detected reverse order (starting from {start_id})")
-            elif start_id is not None and start_id in item_order:
+            if start_id is not None and start_id in item_order:
                 current_idx = item_order.index(start_id)
             else:
                 print(f"  Error: start_id '{start_id}' not found in item order")
                 return results
 
-        for cell in cells[cell_start:]:
+        for cell in cells:
             if not (0 <= current_idx < len(item_order)):
                 break
 
@@ -65,17 +66,6 @@ def process_screenshots_sequential(
             if material_id is None:
                 current_idx += step
                 continue
-
-            # Validate: check icon against expected reference
-            if matcher is not None:
-                ref = matcher.references.get(material_id)
-                if ref is not None:
-                    icon = crop_icon_region(img, cell)
-                    query = cv2.resize(icon, matcher.MATCH_SIZE)
-                    score = cv2.matchTemplate(query, ref, cv2.TM_CCOEFF_NORMED)[0][0]
-                    if score < 0.75:
-                        print(f"  [SKIP] cell doesn't match expected {material_id} (score={score:.2f})")
-                        continue
 
             current_idx += step
 
@@ -92,7 +82,6 @@ def process_screenshots_sequential(
                     print(f"  {material_id}: duplicate (keeping {results[material_id][0]})")
             else:
                 print(f"  {material_id}: OCR failed, skipping")
-
 
     return results
 

@@ -338,6 +338,7 @@ class MainWindow(QMainWindow):
         self._worker: AnalyzeWorker | None = None
         self._justin_data: dict = {}
         self._pending_review: list[ReviewItem] = []
+        self._reviewing_items: list[ReviewItem] = []
         self._reviewing = False
 
         self._reader: CountOcrBackend | None = None
@@ -473,19 +474,33 @@ class MainWindow(QMainWindow):
             return
 
         self._reviewing = True
-        self.review_page.set_items(self._pending_review, self._name_map)
+        self._reviewing_items = list(self._pending_review)
+        self.review_page.set_items(self._reviewing_items, self._name_map)
         self.stack.setCurrentWidget(self.review_page)
 
     def _on_review_done(self, reviewed: dict[str, int]):
         self._reviewing = False
-        self._pending_review = []
+        # Remove only the items that were shown; keep any that arrived mid-review
+        shown_mids = {item.material_id for item in self._reviewing_items}
+        self._pending_review = [
+            item for item in self._pending_review
+            if item.material_id not in shown_mids
+        ]
+        self._reviewing_items = []
 
-        if self._worker is not None and self._worker.isRunning():
+        # Merge reviewed results into confirmed
+        for mid, qty in reviewed.items():
+            self._confirmed[mid] = qty
+
+        if self._pending_review:
+            # New items arrived during review — show them
+            self._try_show_review()
+        elif self._worker is not None and self._worker.isRunning():
             self.stack.setCurrentWidget(self.analyzing_page)
             self.analyzing_page.placeholder.show()
             self.analyzing_page.placeholder.setText("분석 중입니다")
         else:
-            self._finalize(reviewed)
+            self._finalize({})
 
     def _finalize(self, reviewed: dict[str, int]):
         all_updates = {}
