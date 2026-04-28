@@ -49,29 +49,11 @@ class AnalyzeWorker(QThread):
 
     def run(self):
         try:
-            import logging, sys, traceback
-            log_path = str(Path(sys.executable).parent / "debug.log")
-            logging.basicConfig(
-                filename=log_path, level=logging.DEBUG, force=True,
-                format="%(asctime)s %(message)s",
-            )
-            logging.debug("=== AnalyzeWorker start ===")
-            logging.debug("sys._MEIPASS = %s", getattr(sys, "_MEIPASS", "NOT SET"))
-            logging.debug("refs loaded: %d", len(self.matcher.references))
-            logging.debug("item_order len: %d", len(self.item_order))
-            logging.debug("images: %d", len(self.images))
             results, cell_images = process_all_images(
                 self.images, self.item_order, self.matcher, self.reader
             )
-            logging.debug("results: %d items", len(results))
             self.finished.emit(results, cell_images)
         except Exception as e:
-            import logging, sys, traceback
-            log_path = str(Path(sys.executable).parent / "debug.log")
-            logging.basicConfig(
-                filename=log_path, level=logging.DEBUG, force=True,
-            )
-            logging.error("AnalyzeWorker error:\n%s", traceback.format_exc())
             self.error.emit(str(e))
 
 
