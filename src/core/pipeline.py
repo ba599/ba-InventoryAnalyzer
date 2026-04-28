@@ -1,5 +1,6 @@
 import json
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
@@ -8,6 +9,15 @@ import numpy as np
 from src.grid_detector import CellInfo, detect_cells, crop_icon_region, crop_text_region
 from src.item_matcher import ItemMatcher
 from src.count_ocr_backend import CountOcrBackend
+
+
+@dataclass
+class CellResult:
+    """Result from processing a single cell."""
+    material_id: str
+    quantity: int
+    confidence: float
+    cell_image: np.ndarray
 
 
 def load_item_order(path: Path) -> tuple[list[str | None], dict[str, str]]:
@@ -130,7 +140,9 @@ def process_single_image(
 ) -> tuple[dict[str, tuple[int, float]], dict[str, np.ndarray]]:
     """Process a single screenshot independently.
 
-    Auto-scans to find start position, then processes cells sequentially.
+    Auto-scans to find start position, then matches each cell individually
+    against the reference database.  Only items within the expected range
+    (determined by the start position and number of cells) are accepted.
 
     Returns:
         (results, cell_images)
@@ -148,41 +160,163 @@ def process_single_image(
     if match is None:
         return results, cell_images
 
-    cell_start, _, current_idx, reversed_order = match
+    cell_start, _, start_idx, reversed_order = match
     step = -1 if reversed_order else 1
+    num_cells = len(cells) - cell_start
+
+    # Build set of expected material_ids within range (with padding for gaps)
+    expected: set[str] = set()
+    idx = start_idx
+    padding = num_cells  # Allow up to 2x cells worth of items (gaps)
+    for _ in range(num_cells + padding):
+        if not (0 <= idx < len(item_order)):
+            break
+        mid = item_order[idx]
+        if mid is not None:
+            expected.add(mid)
+        idx += step
 
     for cell in cells[cell_start:]:
-        if not (0 <= current_idx < len(item_order)):
-            break
+        icon = crop_icon_region(image, cell)
+        best_id, best_score = matcher.match_with_score(icon)
 
-        material_id = item_order[current_idx]
-
-        if material_id is None:
-            current_idx += step
+        if best_id is None or best_score < min_match_score:
             continue
-
-        # Validate: check icon against expected reference
-        ref = matcher.references.get(material_id)
-        if ref is not None:
-            icon = crop_icon_region(image, cell)
-            query = cv2.resize(icon, matcher.MATCH_SIZE)
-            score = cv2.matchTemplate(query, ref, cv2.TM_CCOEFF_NORMED)[0][0]
-            if score < 0.75:
-                continue  # Skip cell, don't advance index
-
-        current_idx += step
+        if best_id not in expected:
+            continue
+        if best_id in results:
+            continue
 
         text_img = crop_text_region(image, cell)
         result = reader.read_quantity(text_img)
 
         if result is not None:
             qty, conf = result
-            if material_id not in results:
-                results[material_id] = (qty, conf)
-                cell_crop = image[cell.y:cell.y + cell.h, cell.x:cell.x + cell.w].copy()
-                cell_images[material_id] = cell_crop
+            results[best_id] = (qty, conf)
+            cell_crop = image[cell.y:cell.y + cell.h, cell.x:cell.x + cell.w].copy()
+            cell_images[best_id] = cell_crop
 
     return results, cell_images
+
+
+def process_image_streaming(
+    image: np.ndarray,
+    item_order: list[str | None],
+    matcher: ItemMatcher,
+    reader: CountOcrBackend,
+    min_match_score: float = 0.6,
+    consensus_count: int = 7,
+    min_consensus: int = 3,
+):
+    """Process a single screenshot, yielding results one cell at a time.
+
+    Phase 1 (matching): Match cells until `consensus_count` trackable items
+    are found. Use consensus voting to determine start position and direction.
+
+    Phase 2 (index-walking): Assign remaining cells by walking item_order.
+    Stop when a null (dump) slot is encountered.
+
+    Yields:
+        CellResult for each successfully processed cell.
+    """
+    cells = detect_cells(image)
+    if not cells:
+        return
+
+    # Build lookup: material_id -> index in item_order
+    order_index: dict[str, int] = {}
+    for idx, mid in enumerate(item_order):
+        if mid is not None and mid not in order_index:
+            order_index[mid] = idx
+
+    # Phase 1: Match cells to build consensus
+    fwd_votes: Counter[int] = Counter()
+    rev_votes: Counter[int] = Counter()
+    matched_cells: list[tuple[int, str, float]] = []  # (cell_idx, material_id, score)
+    trackable_count = 0
+
+    phase1_last_cell_idx = -1
+    for cell_idx, cell in enumerate(cells):
+        phase1_last_cell_idx = cell_idx
+        icon = crop_icon_region(image, cell)
+        matched_id, score = matcher.match_with_score(icon)
+
+        if matched_id is None or score < min_match_score:
+            continue
+        if matched_id not in order_index:
+            continue  # untrackable item — skip
+
+        j = order_index[matched_id]
+        fwd_votes[j - cell_idx] += 1
+        rev_votes[j + cell_idx] += 1
+        matched_cells.append((cell_idx, matched_id, score))
+        trackable_count += 1
+
+        if trackable_count >= consensus_count:
+            break
+
+    # Determine consensus
+    fwd_best = fwd_votes.most_common(1)[0] if fwd_votes else (0, 0)
+    rev_best = rev_votes.most_common(1)[0] if rev_votes else (0, 0)
+
+    if fwd_best[1] >= rev_best[1]:
+        best_offset, count = fwd_best
+        reversed_order = False
+    else:
+        best_offset, count = rev_best
+        reversed_order = True
+
+    if count < min_consensus:
+        return
+
+    step = -1 if reversed_order else 1
+
+    # Phase 1 results: yield matched cells that align with consensus
+    seen: set[str] = set()
+    for ci, mid, score in matched_cells:
+        if reversed_order:
+            expected_offset = order_index[mid] + ci
+        else:
+            expected_offset = order_index[mid] - ci
+        if expected_offset != best_offset:
+            continue  # outlier vote — skip
+        if mid in seen:
+            continue
+
+        text_img = crop_text_region(image, cells[ci])
+        result = reader.read_quantity(text_img)
+        if result is not None:
+            qty, conf = result
+            cell = cells[ci]
+            cell_crop = image[cell.y:cell.y + cell.h, cell.x:cell.x + cell.w].copy()
+            seen.add(mid)
+            yield CellResult(mid, qty, conf, cell_crop)
+
+    # Phase 2: Walk item_order for remaining cells (no matching)
+    if reversed_order:
+        current_order_idx = best_offset - (phase1_last_cell_idx + 1)
+    else:
+        current_order_idx = best_offset + (phase1_last_cell_idx + 1)
+
+    for ci in range(phase1_last_cell_idx + 1, len(cells)):
+        if not (0 <= current_order_idx < len(item_order)):
+            break
+
+        mid = item_order[current_order_idx]
+        if mid is None:
+            break  # dump boundary — stop
+
+        if mid not in seen:
+            text_img = crop_text_region(image, cells[ci])
+            result = reader.read_quantity(text_img)
+            if result is not None:
+                qty, conf = result
+                cell = cells[ci]
+                cell_crop = image[cell.y:cell.y + cell.h, cell.x:cell.x + cell.w].copy()
+                seen.add(mid)
+                yield CellResult(mid, qty, conf, cell_crop)
+
+        current_order_idx += step
 
 
 def process_all_images(
